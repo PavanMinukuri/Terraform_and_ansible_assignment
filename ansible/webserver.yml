@@ -1,0 +1,132 @@
+---
+- name: Setup Web Server and Deploy MERN App
+  hosts: web
+  become: true
+
+  vars:
+    app_dir: /home/ubuntu/TravelMemory
+    public_ip: "13.207.194.61"   #  UPDATE THIS
+
+  tasks:
+
+    # ========================
+    # SYSTEM SETUP
+    # ========================
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install required packages
+      apt:
+        name:
+          - git
+          - curl
+        state: present
+
+    - name: Install Node.js 18
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+        apt install -y nodejs
+
+    - name: Install serve globally
+      npm:
+        name: serve
+        global: yes
+
+    # ========================
+    # ADD SWAP (VERY IMPORTANT)
+    # ========================
+
+    - name: Add swap memory
+      shell: |
+        fallocate -l 1G /swapfile || true
+        chmod 600 /swapfile
+        mkswap /swapfile || true
+        swapon /swapfile || true
+      args:
+        executable: /bin/bash
+
+    # ========================
+    # CLEAN OLD DEPLOYMENT
+    # ========================
+
+    - name: Stop old processes
+      shell: |
+        pkill node || true
+        pkill serve || true
+
+    - name: Remove old project directory
+      file:
+        path: "{{ app_dir }}"
+        state: absent
+
+    # ========================
+    # CLONE APP
+    # ========================
+
+    - name: Clone MERN repository
+      git:
+        repo: "https://github.com/UnpredictablePrashant/TravelMemory.git"
+        dest: "{{ app_dir }}"
+
+    - name: Fix ownership
+      file:
+        path: "{{ app_dir }}"
+        owner: ubuntu
+        group: ubuntu
+        recurse: yes
+
+    # ========================
+    # BACKEND SETUP
+    # ========================
+
+    - name: Install backend dependencies
+      shell: npm install
+      args:
+        chdir: "{{ app_dir }}/backend"
+
+    - name: Create backend .env file
+      copy:
+        dest: "{{ app_dir }}/backend/.env"
+        content: |
+          MONGO_URI=mongodb://{{ groups['db'] | first }}:27017/travelmemory
+          PORT=3001
+
+    - name: Ensure dotenv loaded
+      lineinfile:
+        path: "{{ app_dir }}/backend/index.js"
+        line: "require('dotenv').config();"
+        insertbefore: BOF
+
+    - name: Start backend server
+      shell: |
+        nohup node index.js > output.log 2>&1 &
+      args:
+        chdir: "{{ app_dir }}/backend"
+
+    # ========================
+    # FRONTEND SETUP
+    # ========================
+
+    - name: Install frontend dependencies
+      shell: npm install --unsafe-perm
+      args:
+        chdir: "{{ app_dir }}/frontend"
+
+    - name: Create frontend .env file
+      copy:
+        dest: "{{ app_dir }}/frontend/.env"
+        content: |
+          REACT_APP_BACKEND_URL=http://{{ public_ip }}:3001
+
+    - name: Build frontend
+      shell: npm run build
+      args:
+        chdir: "{{ app_dir }}/frontend"
+
+    - name: Start frontend server
+      shell: |
+        nohup serve -s build -l 3000 > frontend.log 2>&1 &
+      args:
+        chdir: "{{ app_dir }}/frontend"
