@@ -1,0 +1,62 @@
+---
+- name: Setup MongoDB on DB Server
+  hosts: db
+  become: true
+
+  tasks:
+
+    - name: Remove old MongoDB repo files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/sources.list.d/mongodb-org-6.0.list
+        - /etc/apt/sources.list.d/mongodb.list
+
+    - name: Remove old MongoDB keyrings
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/share/keyrings/mongodb-server-6.0.gpg
+        - /usr/share/keyrings/mongodb.gpg
+
+    - name: Update apt
+      apt:
+        update_cache: yes
+
+    - name: Install dependencies
+      apt:
+        name:
+          - gnupg
+          - curl
+        state: present
+
+    - name: Add MongoDB GPG key
+      shell: |
+        curl -fsSL https://pgp.mongodb.com/server-6.0.asc | gpg --dearmor -o /usr/share/keyrings/mongodb-server-6.0.gpg
+
+    - name: Add MongoDB repo
+      shell: |
+        echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-6.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/6.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+
+    - name: Update apt cache again
+      apt:
+        update_cache: yes
+
+    - name: Install MongoDB
+      apt:
+        name: mongodb-org
+        state: present
+
+    - name: Configure MongoDB bindIp
+      replace:
+        path: /etc/mongod.conf
+        regexp: '127.0.0.1'
+        replace: '0.0.0.0'
+
+    - name: Restart MongoDB
+      service:
+        name: mongod
+        state: restarted
+        enabled: yes
